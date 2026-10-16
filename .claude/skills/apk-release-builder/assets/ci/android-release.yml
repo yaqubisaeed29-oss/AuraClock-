@@ -1,0 +1,114 @@
+name: Android release build
+
+# Builds a signed release APK (sideload / direct download) and AAB (Google Play
+# upload) on a GitHub runner, which has the JDK, Gradle and network access that
+# a chat sandbox does not.
+#
+# Trigger it manually from the Actions tab, by pushing a v* tag, or with:
+#   gh workflow run android-release.yml
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # only used to attach files to a GitHub Release
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          set -e
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-@@COMPILE_SDK@@" "build-tools;36.0.0"
+
+      - name: Prepare release signing
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE_B64" ]; then
+            echo "::warning::RELEASE_KEYSTORE_B64 is not set - falling back to the debug signature. Installable for testing, NOT publishable."
+            exit 0
+          fi
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > release.keystore
+          {
+            echo "storeFile=${GITHUB_WORKSPACE}/release.keystore"
+            echo "storePassword=${RELEASE_STORE_PASSWORD}"
+            echo "keyAlias=${RELEASE_KEY_ALIAS:-release}"
+            echo "keyPassword=${RELEASE_KEY_PASSWORD}"
+          } > keystore.properties
+          chmod 600 release.keystore keystore.properties
+          echo "Signing configured."
+
+      - name: Ensure Gradle wrapper
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Wrapper jar missing - bootstrapping with the runner's Gradle."
+            gradle wrapper --gradle-version "@@GRADLE_VERSION@@" --distribution-type bin
+          fi
+          chmod +x gradlew
+
+      - name: Build release APK and AAB
+        run: ./gradlew --no-daemon --stacktrace clean assembleRelease bundleRelease
+
+      - name: Verify signature and manifest
+        run: |
+          set -e
+          BT_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$BT_DIR/apksigner" verify --verbose --print-certs "$APK"
+          "$BT_DIR/aapt2" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label|launchable-activity|uses-permission)" || true
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          mkdir -p dist
+          VERSION_NAME=$(sed -nE 's/.*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -1)
+          VERSION_CODE=$(sed -nE 's/.*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -1)
+          cp app/build/outputs/apk/release/app-release.apk    "dist/@@PROJECT_NAME@@-${VERSION_NAME}-${VERSION_CODE}-release.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "dist/@@PROJECT_NAME@@-${VERSION_NAME}-${VERSION_CODE}-release.aab"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -la dist
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

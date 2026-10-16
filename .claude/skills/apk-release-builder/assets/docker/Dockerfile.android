@@ -1,0 +1,38 @@
+# Self-contained Android build environment for machines that have Docker but no
+# JDK/SDK (route B). Build the image once, then build any project with it.
+#
+#   docker build -t apk-builder -f Dockerfile.android .
+#   docker run --rm -v "$PWD":/project -w /project apk-builder \
+#     ./gradlew --no-daemon clean assembleRelease bundleRelease
+#
+# The signing keystore stays on the host: mount it and point keystore.properties
+# at the in-container path, e.g.
+#   docker run --rm -v "$PWD":/project -v "$PWD/release.keystore":/keys/release.keystore \
+#     -w /project apk-builder ./gradlew assembleRelease
+# with storeFile=/keys/release.keystore in keystore.properties.
+#
+# commandlinetools-linux-*_latest.zip changes over time; if the URL 404s, get the
+# current one from https://developer.android.com/studio#command-line-tools-only
+FROM eclipse-temurin:17-jdk-jammy
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    CMDLINE_TOOLS_ZIP=commandlinetools-linux-11076708_latest.zip
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates unzip git zip \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
+ && cd /tmp \
+ && curl -fsSLO "https://dl.google.com/android/repository/${CMDLINE_TOOLS_ZIP}" \
+ && unzip -q "${CMDLINE_TOOLS_ZIP}" -d "${ANDROID_SDK_ROOT}/cmdline-tools" \
+ && mv "${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools" "${ANDROID_SDK_ROOT}/cmdline-tools/latest" \
+ && yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null \
+ && "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" \
+      "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+ && rm -f "/tmp/${CMDLINE_TOOLS_ZIP}"
+
+ENV PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/build-tools/36.0.0:${PATH}"
+
+WORKDIR /project

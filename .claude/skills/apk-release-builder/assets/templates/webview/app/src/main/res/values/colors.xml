@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">@@ACCENT_COLOR@@</color>
+    <color name="window_bg">@@BG_COLOR@@</color>
+    <color name="ic_launcher_background">@@ACCENT_COLOR@@</color>
+</resources>

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="@@BG_COLOR@@" />
+<title>@@APP_NAME@@</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <h1 id="title">@@APP_NAME@@</h1>
+    <p id="subtitle" class="muted">Starter build &mdash; replace assets/www with the real app</p>
+  </header>
+
+  <section class="card" id="hero">
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="date muted" id="date">&nbsp;</div>
+  </section>
+
+  <section class="card">
+    <h2>Native bridge</h2>
+    <p class="muted">Available because the app runs inside an Android WebView.</p>
+    <div class="row">
+      <button id="btn-version">App version</button>
+      <button id="btn-vibrate">Vibrate</button>
+      <button id="btn-share">Share</button>
+    </div>
+    <pre class="out" id="out">window.AndroidBridge is ready</pre>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
